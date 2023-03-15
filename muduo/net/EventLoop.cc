@@ -18,7 +18,12 @@
 #include <algorithm>
 
 #include <signal.h>
+#ifndef __MACH__
 #include <sys/eventfd.h>
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#endif
 #include <unistd.h>
 
 using namespace muduo;
@@ -30,6 +35,7 @@ __thread EventLoop* t_loopInThisThread = 0;
 
 const int kPollTimeMs = 10000;
 
+#ifndef __MACH__
 int createEventfd()
 {
   int evtfd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -40,6 +46,7 @@ int createEventfd()
   }
   return evtfd;
 }
+#endif
 
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 class IgnoreSigPipe
@@ -70,11 +77,21 @@ EventLoop::EventLoop()
     threadId_(CurrentThread::tid()),
     poller_(Poller::newDefaultPoller(this)),
     timerQueue_(new TimerQueue(this)),
+#ifndef __MACH__
     wakeupFd_(createEventfd()),
     wakeupChannel_(new Channel(this, wakeupFd_)),
+#endif
     currentActiveChannel_(NULL)
 {
   LOG_DEBUG << "EventLoop created " << this << " in thread " << threadId_;
+#ifdef __MACH__
+  if (::socketpair(AF_UNIX, SOCK_STREAM, 0, wakeupFd_) < 0)
+  {
+    LOG_SYSFATAL << "Failed in socketpair";
+  }
+  wakeupChannel_.reset(new Channel(this, wakeupFd_[0]));
+#endif
+
   if (t_loopInThisThread)
   {
     LOG_FATAL << "Another EventLoop " << t_loopInThisThread
@@ -96,7 +113,12 @@ EventLoop::~EventLoop()
             << " destructs in thread " << CurrentThread::tid();
   wakeupChannel_->disableAll();
   wakeupChannel_->remove();
+#ifndef __MACH__
   ::close(wakeupFd_);
+#else
+  ::close(wakeupFd_[0]);
+  ::close(wakeupFd_[1]);
+#endif
   t_loopInThisThread = NULL;
 }
 
@@ -111,12 +133,19 @@ void EventLoop::loop()
   while (!quit_)
   {
     activeChannels_.clear();
+#ifndef __MACH__
     pollReturnTime_ = poller_->poll(kPollTimeMs, &activeChannels_);
+#else
+    pollReturnTime_ = poller_->poll(timerQueue_->getTimeout(), &activeChannels_);
+#endif
     ++iteration_;
     if (Logger::logLevel() <= Logger::TRACE)
     {
       printActiveChannels();
     }
+#ifdef __MACH__
+    timerQueue_->processTimers();
+#endif
     // TODO sort channel by priority
     eventHandling_ = true;
     for (Channel* channel : activeChannels_)
@@ -234,7 +263,11 @@ void EventLoop::abortNotInLoopThread()
 void EventLoop::wakeup()
 {
   uint64_t one = 1;
+#ifndef __MACH__
   ssize_t n = sockets::write(wakeupFd_, &one, sizeof one);
+#else
+  ssize_t n = sockets::write(wakeupFd_[1], &one, sizeof one);
+#endif
   if (n != sizeof one)
   {
     LOG_ERROR << "EventLoop::wakeup() writes " << n << " bytes instead of 8";
@@ -244,7 +277,11 @@ void EventLoop::wakeup()
 void EventLoop::handleRead()
 {
   uint64_t one = 1;
+#ifndef __MACH__
   ssize_t n = sockets::read(wakeupFd_, &one, sizeof one);
+#else
+  ssize_t n = sockets::read(wakeupFd_[0], &one, sizeof one);
+#endif
   if (n != sizeof one)
   {
     LOG_ERROR << "EventLoop::handleRead() reads " << n << " bytes instead of 8";

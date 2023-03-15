@@ -28,7 +28,7 @@ namespace
 typedef struct sockaddr SA;
 
 
-#if VALGRIND || defined (NO_ACCEPT4)
+#if VALGRIND || defined (NO_ACCEPT4) || defined (__MACH__)
 void setNonBlockAndCloseOnExec(int sockfd)
 {
   // non-block
@@ -76,7 +76,7 @@ const struct sockaddr_in6* sockets::sockaddr_in6_cast(const struct sockaddr* add
 
 int sockets::createNonblockingOrDie(sa_family_t family)
 {
-#if VALGRIND
+#if VALGRIND || defined (__MACH__)
   int sockfd = ::socket(family, SOCK_STREAM, IPPROTO_TCP);
   if (sockfd < 0)
   {

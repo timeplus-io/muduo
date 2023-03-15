@@ -16,6 +16,7 @@ using namespace muduo::net;
 
 Poller* Poller::newDefaultPoller(EventLoop* loop)
 {
+#ifndef __MACH__
   if (::getenv("MUDUO_USE_POLL"))
   {
     return new PollPoller(loop);
@@ -24,4 +25,7 @@ Poller* Poller::newDefaultPoller(EventLoop* loop)
   {
     return new EPollPoller(loop);
   }
+#else
+  return new PollPoller(loop);
+#endif
 }

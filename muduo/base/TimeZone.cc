@@ -15,7 +15,7 @@
 
 #include <assert.h>
 //#define _BSD_SOURCE
-#include <endian.h>
+#include <muduo/net/Endian.h>
 
 #include <stdint.h>
 #include <stdio.h>

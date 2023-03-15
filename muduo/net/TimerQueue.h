@@ -49,6 +49,11 @@ class TimerQueue : noncopyable
 
   void cancel(TimerId timerId);
 
+#ifdef __MACH__
+  int getTimeout() const;
+  void processTimers();
+#endif
+
  private:
 
   // FIXME: use unique_ptr<Timer> instead of raw pointers.
@@ -61,8 +66,10 @@ class TimerQueue : noncopyable
 
   void addTimerInLoop(Timer* timer);
   void cancelInLoop(TimerId timerId);
+#ifndef __MACH__
   // called when timerfd alarms
   void handleRead();
+#endif
   // move out all expired timers
   std::vector<Entry> getExpired(Timestamp now);
   void reset(const std::vector<Entry>& expired, Timestamp now);
@@ -70,8 +77,10 @@ class TimerQueue : noncopyable
   bool insert(Timer* timer);
 
   EventLoop* loop_;
+#ifndef __MACH__
   const int timerfd_;
   Channel timerfdChannel_;
+#endif
   // Timer list sorted by expiration
   TimerList timers_;
 

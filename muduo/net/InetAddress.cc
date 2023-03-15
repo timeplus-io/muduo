@@ -47,8 +47,11 @@ using namespace muduo::net;
 
 static_assert(sizeof(InetAddress) == sizeof(struct sockaddr_in6),
               "InetAddress is same size as sockaddr_in6");
+
+#ifndef __MACH__
 static_assert(offsetof(sockaddr_in, sin_family) == 0, "sin_family offset 0");
 static_assert(offsetof(sockaddr_in6, sin6_family) == 0, "sin6_family offset 0");
+#endif
 static_assert(offsetof(sockaddr_in, sin_port) == 2, "sin_port offset 2");
 static_assert(offsetof(sockaddr_in6, sin6_port) == 2, "sin6_port offset 2");
 
@@ -120,10 +123,15 @@ bool InetAddress::resolve(StringArg hostname, InetAddress* out)
   assert(out != NULL);
   struct hostent hent;
   struct hostent* he = NULL;
-  int herrno = 0;
   memZero(&hent, sizeof(hent));
 
+#ifndef __MACH__
+  int herrno = 0;
   int ret = gethostbyname_r(hostname.c_str(), &hent, t_resolveBuffer, sizeof t_resolveBuffer, &he, &herrno);
+#else
+  he = gethostbyname(hostname.c_str());
+  int ret = 0;
+#endif
   if (ret == 0 && he != NULL)
   {
     assert(he->h_addrtype == AF_INET && he->h_length == sizeof(uint32_t));

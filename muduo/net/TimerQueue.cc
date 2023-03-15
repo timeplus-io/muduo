@@ -17,7 +17,9 @@
 #include "muduo/net/Timer.h"
 #include "muduo/net/TimerId.h"
 
+#ifndef __MACH__
 #include <sys/timerfd.h>
+#endif
 #include <unistd.h>
 
 namespace muduo
@@ -27,6 +29,7 @@ namespace net
 namespace detail
 {
 
+#ifndef __MACH__
 int createTimerfd()
 {
   int timerfd = ::timerfd_create(CLOCK_MONOTONIC,
@@ -79,6 +82,18 @@ void resetTimerfd(int timerfd, Timestamp expiration)
     LOG_SYSERR << "timerfd_settime()";
   }
 }
+#else
+int howMuchTimeFromNow(Timestamp when)
+{
+  int64_t microseconds = when.microSecondsSinceEpoch()
+                         - Timestamp::now().microSecondsSinceEpoch();
+  if (microseconds < 1000)
+  {
+    microseconds = 1000;
+  }
+  return static_cast<int>(microseconds / 1000);
+}
+#endif
 
 }  // namespace detail
 }  // namespace net
@@ -90,22 +105,28 @@ using namespace muduo::net::detail;
 
 TimerQueue::TimerQueue(EventLoop* loop)
   : loop_(loop),
+#ifndef __MACH__
     timerfd_(createTimerfd()),
     timerfdChannel_(loop, timerfd_),
+#endif
     timers_(),
     callingExpiredTimers_(false)
 {
+#ifndef __MACH__
   timerfdChannel_.setReadCallback(
       std::bind(&TimerQueue::handleRead, this));
   // we are always reading the timerfd, we disarm it with timerfd_settime.
   timerfdChannel_.enableReading();
+#endif
 }
 
 TimerQueue::~TimerQueue()
 {
+#ifndef __MACH__
   timerfdChannel_.disableAll();
   timerfdChannel_.remove();
   ::close(timerfd_);
+#endif
   // do not remove channel, since we're in EventLoop::dtor();
   for (const Entry& timer : timers_)
   {
@@ -129,6 +150,7 @@ void TimerQueue::cancel(TimerId timerId)
       std::bind(&TimerQueue::cancelInLoop, this, timerId));
 }
 
+#ifndef __MACH__
 void TimerQueue::addTimerInLoop(Timer* timer)
 {
   loop_->assertInLoopThread();
@@ -139,6 +161,27 @@ void TimerQueue::addTimerInLoop(Timer* timer)
     resetTimerfd(timerfd_, timer->expiration());
   }
 }
+#else
+void TimerQueue::addTimerInLoop(Timer* timer)
+{
+  loop_->assertInLoopThread();
+  insert(timer);
+}
+
+
+int TimerQueue::getTimeout() const
+{
+  loop_->assertInLoopThread();
+  if (timers_.empty())
+  {
+    return 10000;
+  }
+  else
+  {
+    return howMuchTimeFromNow(timers_.begin()->second->expiration());
+  }
+}
+#endif
 
 void TimerQueue::cancelInLoop(TimerId timerId)
 {
@@ -160,6 +203,7 @@ void TimerQueue::cancelInLoop(TimerId timerId)
   assert(timers_.size() == activeTimers_.size());
 }
 
+#ifndef __MACH__
 void TimerQueue::handleRead()
 {
   loop_->assertInLoopThread();
@@ -179,6 +223,26 @@ void TimerQueue::handleRead()
 
   reset(expired, now);
 }
+#else
+void TimerQueue::processTimers()
+{
+  loop_->assertInLoopThread();
+  Timestamp now(Timestamp::now());
+
+  std::vector<Entry> expired = getExpired(now);
+
+  callingExpiredTimers_ = true;
+  cancelingTimers_.clear();
+  // safe to callback outside critical section
+  for (const Entry& it : expired)
+  {
+    it.second->run();
+  }
+  callingExpiredTimers_ = false;
+
+  reset(expired, now);
+}
+#endif
 
 std::vector<TimerQueue::Entry> TimerQueue::getExpired(Timestamp now)
 {
@@ -226,10 +290,12 @@ void TimerQueue::reset(const std::vector<Entry>& expired, Timestamp now)
     nextExpire = timers_.begin()->second->expiration();
   }
 
+#ifndef __MACH__
   if (nextExpire.valid())
   {
     resetTimerfd(timerfd_, nextExpire);
   }
+#endif
 }
 
 bool TimerQueue::insert(Timer* timer)
