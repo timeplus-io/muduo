@@ -115,7 +115,7 @@ void sockets::listenOrDie(int sockfd)
 int sockets::accept(int sockfd, struct sockaddr_in6* addr)
 {
   socklen_t addrlen = static_cast<socklen_t>(sizeof *addr);
-#if VALGRIND || defined (NO_ACCEPT4)
+#if VALGRIND || defined (NO_ACCEPT4) || defined (__MACH__)
   int connfd = ::accept(sockfd, sockaddr_cast(addr), &addrlen);
   setNonBlockAndCloseOnExec(connfd);
 #else
